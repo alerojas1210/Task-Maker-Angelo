@@ -1,0 +1,88 @@
+def process_transactions(input_text):
+    if not input_text.strip():
+        return
+
+    headers = [
+        "Document Number",
+        "TranDateTime",
+        "TranType",
+        "Description",
+        "EnteredBy",
+        "CreditedAmount",
+        "DebitAmount",
+        "TotalAmount",
+        "Surplus After Cover"
+    ]
+
+    lines = input_text.strip().split("\n")
+    rows = [line.split("\t") for line in lines]
+
+    debt = 0.0
+    processed = []
+
+    # Procesar de abajo hacia arriba (oldest → newest)
+    for r in reversed(rows):
+        total = float(r[7]) if len(r) > 7 and r[7] else 0.0
+
+        color = "green"
+        surplus = ""
+
+        # Payout
+        if total < 0:
+            debt += abs(total)
+            color = "red"
+
+        # Deposit
+        elif total > 0:
+            if debt > 0:
+                if total < debt:
+                    debt -= total
+                    color = "red"
+                else:
+                    surplus = f"{total - debt:.2f}"
+                    debt = 0
+                    color = "yellow"
+            else:
+                color = "green"
+
+        processed.append({
+            "data": r,
+            "color": color,
+            "surplus": surplus
+        })
+
+    # Restaurar orden original
+    processed.reverse()
+
+    # Imprimir tabla
+    print("\n" + " | ".join(headers))
+    print("-" * 120)
+
+    for p in processed:
+        row = p["data"] + [p["surplus"]]
+        print(" | ".join(cell if cell else "" for cell in row))
+
+    # Estado final
+    print("\nSTATUS:")
+    if debt == 0:
+        print("✅ Good to go")
+    else:
+        print(f"❌ Uncovered Payouts: ${debt:.2f}")
+
+
+# -------------------------
+# USO
+# -------------------------
+print("Paste the transactions (tab-separated).")
+print("Finish with an empty line:\n")
+
+lines = []
+while True:
+    line = input()
+    if line == "":
+        break
+    lines.append(line)
+
+input_text = "\n".join(lines)
+process_transactions(input_text)
+
