@@ -376,6 +376,37 @@ td.dim { color: var(--text3); }
 .empty p { font-size: 14px; max-width: 420px; margin: 0 auto; line-height: 1.7; }
 .empty strong { color: var(--neon); }
 
+/* ── DROP ZONE ── */
+.drop-zone {
+  border: 1.5px dashed var(--border3);
+  border-radius: var(--r); padding: 36px 24px;
+  text-align: center; cursor: pointer;
+  transition: all .25s; background: var(--surface);
+  margin-bottom: 16px;
+}
+.drop-zone:hover { border-color: var(--neon); background: var(--neon-dim); }
+.drop-zone.dragover { border-color: var(--neon); background: var(--neon-dim); box-shadow: var(--neon-glow); }
+.drop-zone .dz-icon {
+  width: 48px; height: 48px; margin: 0 auto 14px;
+  background: var(--surface3); border: 1px solid var(--border2);
+  border-radius: 14px; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; transition: all .25s;
+}
+.drop-zone:hover .dz-icon { background: var(--neon-dim); border-color: rgba(0,240,255,0.2); }
+.drop-zone .dz-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+.drop-zone .dz-sub { font-size: 12px; color: var(--text3); }
+.drop-zone .dz-sub span { color: var(--neon); cursor: pointer; font-weight: 600; }
+
+.upload-success {
+  display: none; align-items: center; gap: 12px;
+  padding: 14px 18px; border-radius: var(--r-sm);
+  background: var(--lime-dim); border: 1px solid var(--lime-mid);
+  margin-bottom: 16px; animation: rowIn .3s ease;
+}
+.upload-success .us-icon { font-size: 18px; }
+.upload-success .us-text { font-size: 13px; font-weight: 600; color: var(--lime); }
+.upload-success .us-detail { font-size: 11px; color: var(--text2); }
+
 /* ── EXPORT BAR ── */
 .export-bar {
   display: flex; gap: 8px; margin-top: 14px; padding-top: 14px;
@@ -517,7 +548,22 @@ td.dim { color: var(--text3); }
     <div class="sec-header">
       <div class="sec-tag">DAILY CONFIG</div>
       <div class="sec-title">Today's Schedule</div>
-      <p class="sec-sub">Configure shifts and availability. Hit GENERATE to auto-assign all tasks.</p>
+      <p class="sec-sub">Upload the day's CSV schedule — tasks are generated automatically.</p>
+    </div>
+
+    <div class="drop-zone" id="drop-zone">
+      <div class="dz-icon">📄</div>
+      <div class="dz-title">Drop today's schedule CSV here</div>
+      <div class="dz-sub">or <span id="browse-link">browse files</span> — format: Name, Start, End</div>
+    </div>
+    <input type="file" id="sched-file" accept=".csv,.txt" style="display:none">
+
+    <div class="upload-success" id="upload-success">
+      <span class="us-icon">✓</span>
+      <div>
+        <div class="us-text" id="us-text">Schedule loaded</div>
+        <div class="us-detail" id="us-detail"></div>
+      </div>
     </div>
 
     <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;">
@@ -901,6 +947,112 @@ function importRosterCSV(e){
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function td(){return new Date().toISOString().slice(0,10);}
 function dl(t,n,m){var b=new Blob([t],{type:m}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=n;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u);}
+
+/* ════════════════════════════════════════════════
+   SCHEDULE CSV UPLOAD
+   ════════════════════════════════════════════════ */
+function parse12to24(str) {
+  str = str.trim().toUpperCase();
+  if (str === 'OFF' || str === 'VAC' || str === '') return null;
+  // Handle formats: "6:00 AM", "2:00 PM", "14:00", etc.
+  var ampm = str.match(/(AM|PM)$/);
+  var timePart = str.replace(/(AM|PM)/i, '').trim();
+  var parts = timePart.split(':');
+  var h = parseInt(parts[0], 10);
+  var m = parts[1] ? parseInt(parts[1], 10) : 0;
+  if (ampm) {
+    if (ampm[1] === 'PM' && h !== 12) h += 12;
+    if (ampm[1] === 'AM' && h === 12) h = 0;
+  }
+  return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+}
+
+function loadScheduleCSV(text) {
+  var lines = text.replace(/\r/g, '').split('\n').filter(function(l) { return l.trim(); });
+  var newSchedule = [];
+  var loaded = 0, offCount = 0, vacCount = 0, unknownNames = [];
+
+  lines.forEach(function(line) {
+    var parts = line.split(',');
+    if (parts.length < 2) return;
+    var name = parts[0].replace(/^\uFEFF/, '').trim();
+    if (!name || name.toLowerCase() === 'cc' || name === '') return;
+
+    var raw1 = (parts[1] || '').trim().toUpperCase();
+    var raw2 = (parts[2] || '').trim().toUpperCase();
+
+    var status, start, end;
+    if (raw1 === 'OFF') {
+      status = 'off'; start = '00:00'; end = '00:00'; offCount++;
+    } else if (raw1 === 'VAC') {
+      status = 'vac'; start = '00:00'; end = '00:00'; vacCount++;
+    } else {
+      start = parse12to24(parts[1]);
+      end = parse12to24(parts[2]);
+      if (!start || !end) { status = 'off'; start = '00:00'; end = '00:00'; offCount++; }
+      else { status = 'working'; loaded++; }
+    }
+
+    // Check if agent exists in roster
+    var found = roster.find(function(a) {
+      return a.name.toLowerCase().trim() === name.toLowerCase().trim();
+    });
+    if (!found) unknownNames.push(name);
+
+    newSchedule.push({ name: name, start: start, end: end, status: status });
+  });
+
+  if (newSchedule.length === 0) return false;
+
+  schedule = newSchedule;
+  renderSchedule();
+
+  // Show success banner
+  var banner = document.getElementById('upload-success');
+  banner.style.display = 'flex';
+  document.getElementById('us-text').textContent = loaded + ' agents working · ' + offCount + ' OFF' + (vacCount ? ' · ' + vacCount + ' VAC' : '');
+  var detail = newSchedule.length + ' rows loaded';
+  if (unknownNames.length) detail += ' — ' + unknownNames.length + ' not in roster: ' + unknownNames.slice(0, 3).join(', ') + (unknownNames.length > 3 ? '…' : '');
+  document.getElementById('us-detail').textContent = detail;
+
+  return true;
+}
+
+function handleScheduleFile(file) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var ok = loadScheduleCSV(e.target.result);
+    if (ok) {
+      // Auto-generate tasks after short delay for visual feedback
+      setTimeout(function() { generateTasks(); }, 400);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// Drop zone wiring
+(function() {
+  var dz = document.getElementById('drop-zone');
+  var fi = document.getElementById('sched-file');
+  var browseLink = document.getElementById('browse-link');
+
+  dz.addEventListener('click', function() { fi.click(); });
+  browseLink.addEventListener('click', function(e) { e.stopPropagation(); fi.click(); });
+
+  dz.addEventListener('dragover', function(e) { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', function() { dz.classList.remove('dragover'); });
+  dz.addEventListener('drop', function(e) {
+    e.preventDefault(); dz.classList.remove('dragover');
+    var files = Array.from(e.dataTransfer.files);
+    var csv = files.find(function(f) { return f.name.endsWith('.csv') || f.name.endsWith('.txt'); });
+    if (csv) handleScheduleFile(csv);
+  });
+
+  fi.addEventListener('change', function() {
+    if (fi.files[0]) handleScheduleFile(fi.files[0]);
+    fi.value = '';
+  });
+})();
 
 /* ════════════════════════════════════════════════
    INIT
