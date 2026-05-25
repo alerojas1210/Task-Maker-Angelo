@@ -548,15 +548,32 @@ td.dim { color: var(--text3); }
     <div class="sec-header">
       <div class="sec-tag">DAILY CONFIG</div>
       <div class="sec-title">Today's Schedule</div>
-      <p class="sec-sub">Upload the day's CSV schedule — tasks are generated automatically.</p>
+      <p class="sec-sub">Upload a CSV or paste the weekly schedule text. Tasks and breaks are assigned automatically — zero gaps.</p>
     </div>
 
     <div class="drop-zone" id="drop-zone">
       <div class="dz-icon">📄</div>
-      <div class="dz-title">Drop today's schedule CSV here</div>
-      <div class="dz-sub">or <span id="browse-link">browse files</span> — format: Name, Start, End</div>
+      <div class="dz-title">Drop CSV or paste schedule below</div>
+      <div class="dz-sub">or <span id="browse-link">browse files</span> — accepts daily CSV (Name, Start, End) </div>
     </div>
     <input type="file" id="sched-file" accept=".csv,.txt" style="display:none">
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-head">
+        <span class="panel-label">PASTE WEEKLY SCHEDULE</span>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--text3);">Copy from PDF → paste here</span>
+      </div>
+      <div class="panel-body" style="padding:12px 16px;">
+        <textarea id="paste-area" rows="5" placeholder="Paste the full weekly schedule text from the PDF here..." style="width:100%;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:10px 14px;border-radius:8px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);resize:vertical;outline:none;"></textarea>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+          <div class="field" style="min-width:130px;">
+            <label>DAY OF WEEK</label>
+            <select id="day-picker" style="font-family:'IBM Plex Mono',monospace;font-size:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--border2);background:var(--surface2);color:var(--text);cursor:pointer;"></select>
+          </div>
+          <button class="btn btn-glow btn-sm" onclick="parseWeeklyPaste()">PARSE & LOAD</button>
+        </div>
+      </div>
+    </div>
 
     <div class="upload-success" id="upload-success">
       <span class="us-icon">✓</span>
@@ -567,7 +584,7 @@ td.dim { color: var(--text3); }
     </div>
 
     <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;">
-      <button class="btn btn-glow" onclick="generateTasks()" style="font-size:13px;padding:14px 32px;">▶ GENERATE TASKS</button>
+      <button class="btn btn-glow" onclick="generateTasks()" style="font-size:13px;padding:14px 32px;">▶ GENERATE TASKS + BREAKS</button>
       <button class="btn btn-ghost" onclick="setAllWorking()">ALL WORKING</button>
       <button class="btn btn-ghost" onclick="setAllOff()">ALL OFF</button>
     </div>
@@ -610,7 +627,7 @@ td.dim { color: var(--text3); }
         <div style="overflow-x:auto;">
           <table class="result-table">
             <thead><tr>
-              <th>#</th><th>AGENT</th><th>SHIFT</th><th>GRP</th><th>MAIN TASK</th><th>SECONDARY TASK</th>
+              <th>#</th><th>AGENT</th><th>SHIFT</th><th>GRP</th><th>MAIN TASK</th><th>SECONDARY TASK</th><th>BREAK 1</th><th>BREAK 2</th>
             </tr></thead>
             <tbody id="results-body"></tbody>
           </table>
@@ -813,7 +830,7 @@ function generateTasks(){
   assignCasino(A);assignVIP(A,'Morning');assignVIP(A,'Afternoon');assignTier1(A);
   assignDeposits(A,'Morning');assignDeposits(A,'Afternoon');
   assignPayouts(A,'Morning');assignPayouts(A,'Afternoon');
-  assignFixed(A);assignBlasts(A);
+  assignFixed(A);assignBlasts(A);assignBreaks(A);
   lastResults=A;renderResults();switchView('results');
 }
 
@@ -906,6 +923,8 @@ function renderResultsTable(){
     html+='<td><span class="g-chip g-'+r.group+'">'+r.group+'</span></td>';
     html+='<td class="task-cell">'+esc(r.mainTask)+'</td>';
     html+='<td class="task-cell" style="color:var(--text3);">'+esc(r.secTask)+'</td>';
+    html+='<td class="mono" style="font-size:10px;color:var(--amber);">'+(r.break1||'—')+'</td>';
+    html+='<td class="mono" style="font-size:10px;color:var(--amber);">'+(r.break2||'—')+'</td>';
     html+='</tr>';
   });
   document.getElementById('results-body').innerHTML=html;
@@ -920,14 +939,14 @@ function filterResults(f){resultFilter=f;renderResultsTable();}
    ════════════════════════════════════════════════ */
 function downloadResultsCSV(){
   if(!lastResults.length)return;
-  var rows=['Name,Start,End,Shift,Group,Main Task,Secondary Task'];
-  lastResults.forEach(function(r){rows.push(['"'+r.name+'"',r.start,r.end,r.shift,r.group,'"'+r.mainTask+'"','"'+r.secTask+'"'].join(','));});
+  var rows=['Name,Start,End,Shift,Group,Main Task,Secondary Task,Break 1,Break 2'];
+  lastResults.forEach(function(r){rows.push(['"'+r.name+'"',r.start,r.end,r.shift,r.group,'"'+r.mainTask+'"','"'+r.secTask+'"','"'+(r.break1||'')+'"','"'+(r.break2||'')+'"'].join(','));});
   dl(rows.join('\n'),'tasks_'+td()+'.csv','text/csv');
 }
 function copyResults(){
   if(!lastResults.length)return;
-  var l=['Name\tStart\tEnd\tGroup\tMain Task\tSecondary Task'];
-  lastResults.forEach(function(r){l.push([r.name,r.start,r.end,r.group,r.mainTask,r.secTask].join('\t'));});
+  var l=['Name\tStart\tEnd\tGroup\tMain Task\tSecondary Task\tBreak 1\tBreak 2'];
+  lastResults.forEach(function(r){l.push([r.name,r.start,r.end,r.group,r.mainTask,r.secTask,r.break1||'',r.break2||''].join('\t'));});
   navigator.clipboard.writeText(l.join('\n')).then(function(){alert('Copied!');});
 }
 function exportRosterCSV(){
@@ -984,8 +1003,11 @@ function loadScheduleCSV(text) {
     var status, start, end;
     if (raw1 === 'OFF') {
       status = 'off'; start = '00:00'; end = '00:00'; offCount++;
-    } else if (raw1 === 'VAC') {
+    } else if (raw1 === 'VAC' || raw1 === 'PL') {
       status = 'vac'; start = '00:00'; end = '00:00'; vacCount++;
+    } else if (raw1 === 'MJ' || raw1 === 'VICTOR' || raw1 === 'PABLO') {
+      // Coach entries — skip
+      return;
     } else {
       start = parse12to24(parts[1]);
       end = parse12to24(parts[2]);
@@ -993,7 +1015,6 @@ function loadScheduleCSV(text) {
       else { status = 'working'; loaded++; }
     }
 
-    // Check if agent exists in roster
     var found = roster.find(function(a) {
       return a.name.toLowerCase().trim() === name.toLowerCase().trim();
     });
@@ -1003,31 +1024,284 @@ function loadScheduleCSV(text) {
   });
 
   if (newSchedule.length === 0) return false;
-
   schedule = newSchedule;
   renderSchedule();
+  showUploadBanner(loaded, offCount, vacCount, newSchedule.length, unknownNames);
+  return true;
+}
 
-  // Show success banner
+/* ════════════════════════════════════════════════
+   WEEKLY SCHEDULE PARSER (from PDF text)
+   ════════════════════════════════════════════════ */
+function parseShiftStr(s) {
+  s = s.trim();
+  if (!s || s === '—' || s === '-') return null;
+  var u = s.toUpperCase();
+  if (u === 'OFF') return {status:'off'};
+  if (u === 'VAC') return {status:'vac'};
+  if (u === 'PL') return {status:'vac'};
+  if (u === 'MJ' || u === 'VICTOR' || u === 'PABLO') return null; // coach
+
+  // Try patterns: "6am-2pm", "3pm-11pm", "10pm-6am", "3:00 PM", "9am-5pm"
+  var m = s.match(/(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i);
+  if (m) {
+    var st = parse12to24(m[1]);
+    var en = parse12to24(m[2]);
+    if (st && en) return {status:'working', start:st, end:en};
+  }
+  // Bare time like "3:00 PM" — treat as start with +8h end
+  var bare = parse12to24(s);
+  if (bare) {
+    var h = parseInt(bare.split(':')[0],10);
+    var endH = (h + 8) % 24;
+    return {status:'working', start:bare, end:(endH<10?'0':'')+endH+':00'};
+  }
+  return null;
+}
+
+function parseWeeklyText(text) {
+  // Find all day columns from header row (e.g., "25-May", "26-May", ...)
+  var dayPattern = /(\d{1,2})-(\w{3})/g;
+  var dayLabels = [];
+  var match;
+  var seen = {};
+  while ((match = dayPattern.exec(text)) !== null) {
+    var label = match[1] + '-' + match[2];
+    if (!seen[label]) { seen[label] = true; dayLabels.push(label); }
+  }
+  // Deduplicate — keep first 7 unique
+  dayLabels = dayLabels.slice(0, 7);
+
+  // Build a per-agent, per-day map
+  // Strategy: find lines that start with a name and have shift data
+  var lines = text.replace(/\r/g, '').split('\n');
+  var agentDays = {}; // { agentName: [shift0, shift1, ..., shift6] }
+
+  // Known section headers to skip
+  var skipWords = ['agent','monday','tuesday','wednesday','thursday','friday','saturday','sunday',
+    'phones','chats','supervisors','floor support','vip','deposits','3rd party','processing',
+    'training','workforce','payouts','new hire','schedule','customer service','from ','coach'];
+
+  lines.forEach(function(line) {
+    var trimmed = line.trim();
+    if (!trimmed) return;
+    var lower = trimmed.toLowerCase();
+    // Skip section headers
+    for (var i = 0; i < skipWords.length; i++) {
+      if (lower.indexOf(skipWords[i]) === 0 && lower.length < 60) return;
+    }
+
+    // Split by multiple spaces (layout-preserved text)
+    var parts = trimmed.split(/\s{2,}/);
+    if (parts.length < 2) return;
+
+    var name = parts[0].trim();
+    // Name heuristic: must contain at least one letter, not be a date
+    if (!/[a-zA-Z]/.test(name) || /^\d+-\w{3}$/.test(name)) return;
+    if (name.length < 3) return;
+
+    var shifts = parts.slice(1).map(function(p) { return p.trim(); });
+    if (shifts.length === 0) return;
+
+    // Validate at least one looks like a shift
+    var hasShift = shifts.some(function(s) {
+      var u = s.toUpperCase();
+      return u === 'OFF' || u === 'VAC' || u === 'PL' || /\d/.test(s);
+    });
+    if (!hasShift) return;
+
+    agentDays[name] = shifts;
+  });
+
+  return { dayLabels: dayLabels, agentDays: agentDays };
+}
+
+function populateDayPicker(dayLabels) {
+  var sel = document.getElementById('day-picker');
+  sel.innerHTML = '';
+  var dayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  dayLabels.forEach(function(d, i) {
+    var opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = (dayNames[i] || '') + ' ' + d;
+    // Default to today's day of week
+    var today = new Date().getDay(); // 0=Sun
+    var mappedToday = today === 0 ? 6 : today - 1; // 0=Mon
+    if (i === mappedToday) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+var _weeklyParsed = null;
+
+function parseWeeklyPaste() {
+  var text = document.getElementById('paste-area').value.trim();
+  if (!text) return;
+
+  var parsed = parseWeeklyText(text);
+  _weeklyParsed = parsed;
+
+  if (parsed.dayLabels.length > 0) {
+    populateDayPicker(parsed.dayLabels);
+  }
+
+  var dayIdx = parseInt(document.getElementById('day-picker').value, 10) || 0;
+  loadDayFromWeekly(parsed, dayIdx);
+}
+
+function loadDayFromWeekly(parsed, dayIdx) {
+  var newSchedule = [];
+  var loaded = 0, offCount = 0, vacCount = 0, unknownNames = [];
+
+  Object.keys(parsed.agentDays).forEach(function(name) {
+    var shifts = parsed.agentDays[name];
+    var shiftStr = shifts[dayIdx] || 'OFF';
+    var result = parseShiftStr(shiftStr);
+    if (!result) return;
+
+    var entry = { name: name, start: '00:00', end: '00:00', status: result.status };
+    if (result.status === 'working') {
+      entry.start = result.start;
+      entry.end = result.end;
+      loaded++;
+    } else if (result.status === 'off') { offCount++; }
+    else { vacCount++; }
+
+    var found = roster.find(function(a) {
+      return a.name.toLowerCase().trim() === name.toLowerCase().trim();
+    });
+    if (!found) unknownNames.push(name);
+
+    newSchedule.push(entry);
+  });
+
+  if (newSchedule.length === 0) { alert('No agents found for this day.'); return; }
+  schedule = newSchedule;
+  renderSchedule();
+  showUploadBanner(loaded, offCount, vacCount, newSchedule.length, unknownNames);
+  setTimeout(function() { generateTasks(); }, 400);
+}
+
+function showUploadBanner(loaded, offCount, vacCount, total, unknownNames) {
   var banner = document.getElementById('upload-success');
   banner.style.display = 'flex';
-  document.getElementById('us-text').textContent = loaded + ' agents working · ' + offCount + ' OFF' + (vacCount ? ' · ' + vacCount + ' VAC' : '');
-  var detail = newSchedule.length + ' rows loaded';
+  document.getElementById('us-text').textContent = loaded + ' working · ' + offCount + ' OFF' + (vacCount ? ' · ' + vacCount + ' VAC' : '');
+  var detail = total + ' rows loaded';
   if (unknownNames.length) detail += ' — ' + unknownNames.length + ' not in roster: ' + unknownNames.slice(0, 3).join(', ') + (unknownNames.length > 3 ? '…' : '');
   document.getElementById('us-detail').textContent = detail;
-
-  return true;
 }
 
 function handleScheduleFile(file) {
   var reader = new FileReader();
   reader.onload = function(e) {
     var ok = loadScheduleCSV(e.target.result);
-    if (ok) {
-      // Auto-generate tasks after short delay for visual feedback
-      setTimeout(function() { generateTasks(); }, 400);
-    }
+    if (ok) setTimeout(function() { generateTasks(); }, 400);
   };
   reader.readAsText(file);
+}
+
+/* ════════════════════════════════════════════════
+   BREAK SCHEDULER — no task uncovered
+   ════════════════════════════════════════════════
+
+   Rules:
+   - Every agent gets 2 breaks of 30 min each
+   - Break 1: in the first half of the shift
+   - Break 2: in the second half of the shift
+   - At any 30-min slot, at most 1 agent per task-group
+     can be on break (so the task is always covered)
+   ════════════════════════════════════════════════ */
+function assignBreaks(assignments) {
+  // Build 30-min slots from 05:00 to 24:00
+  var SLOT_SIZE = 30; // minutes
+  var slots = []; // {time:'06:00', agents:[]} — who is on break in this slot
+
+  // Group agents by their group+shift combo to enforce coverage
+  // For each group+shift, stagger breaks so max 1 person is on break per slot
+  var groups = {};
+  assignments.forEach(function(a, idx) {
+    var key = a.group + '_' + a.shift;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(idx);
+  });
+
+  // For each agent, compute valid break windows
+  assignments.forEach(function(a) {
+    var startMin = timeToMin(a.start);
+    var endMin = timeToMin(a.end);
+    if (endMin <= startMin) endMin += 24 * 60; // overnight shift
+    var shiftLen = endMin - startMin;
+    var mid = startMin + Math.floor(shiftLen / 2);
+
+    // Break 1 window: from start+60 to mid
+    // Break 2 window: from mid to end-60
+    a._b1Earliest = startMin + 60;
+    a._b1Latest = mid;
+    a._b2Earliest = mid;
+    a._b2Latest = endMin - 60;
+    a._startMin = startMin;
+    a._endMin = endMin;
+    a.break1 = '';
+    a.break2 = '';
+  });
+
+  // Track which slots are taken per group
+  var slotTaken = {}; // { "B_Morning_180": true } means group B Morning has someone on break at minute 180
+
+  // Assign breaks group by group, staggering within each group
+  Object.keys(groups).forEach(function(key) {
+    var idxs = groups[key];
+    var offsetCounter = 0;
+
+    idxs.forEach(function(idx) {
+      var a = assignments[idx];
+
+      // Break 1: find first available 30-min slot in window
+      var b1 = findSlot(a._b1Earliest, a._b1Latest, key, slotTaken, offsetCounter);
+      if (b1 !== null) {
+        a.break1 = minToTime(b1) + '–' + minToTime(b1 + SLOT_SIZE);
+        slotTaken[key + '_' + b1] = true;
+      }
+
+      // Break 2: find first available 30-min slot in window
+      var b2Start = Math.max(a._b2Earliest, (b1 || a._b1Earliest) + 90); // at least 90 min after break 1
+      var b2 = findSlot(b2Start, a._b2Latest, key, slotTaken, 0);
+      if (b2 !== null) {
+        a.break2 = minToTime(b2) + '–' + minToTime(b2 + SLOT_SIZE);
+        slotTaken[key + '_' + b2] = true;
+      }
+
+      offsetCounter++;
+    });
+  });
+}
+
+function findSlot(earliest, latest, groupKey, slotTaken, offset) {
+  // Start from earliest + offset*30 (stagger), wrap around if needed
+  var startAt = earliest + (offset * 30);
+  // Try from startAt forward
+  for (var t = startAt; t + 30 <= latest; t += 30) {
+    if (!slotTaken[groupKey + '_' + t]) return t;
+  }
+  // Wrap: try from earliest
+  for (var t = earliest; t + 30 <= latest && t < startAt; t += 30) {
+    if (!slotTaken[groupKey + '_' + t]) return t;
+  }
+  // Fallback: just pick anything in range
+  for (var t = earliest; t + 30 <= latest; t += 15) {
+    if (!slotTaken[groupKey + '_' + t]) return t;
+  }
+  return null;
+}
+
+function timeToMin(t) {
+  var p = t.split(':');
+  return parseInt(p[0],10) * 60 + parseInt(p[1],10);
+}
+function minToTime(m) {
+  m = ((m % 1440) + 1440) % 1440;
+  var h = Math.floor(m / 60), mi = m % 60;
+  return (h < 10 ? '0' : '') + h + ':' + (mi < 10 ? '0' : '') + mi;
 }
 
 // Drop zone wiring
@@ -1052,6 +1326,27 @@ function handleScheduleFile(file) {
     if (fi.files[0]) handleScheduleFile(fi.files[0]);
     fi.value = '';
   });
+})();
+
+// Day picker: populate with today's week
+(function() {
+  var sel = document.getElementById('day-picker');
+  var dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  var today = new Date();
+  // Find Monday of this week
+  var dow = today.getDay(); // 0=Sun
+  var mondayOffset = dow === 0 ? -6 : 1 - dow;
+  for (var i = 0; i < 7; i++) {
+    var d = new Date(today);
+    d.setDate(today.getDate() + mondayOffset + i);
+    var opt = document.createElement('option');
+    opt.value = i;
+    var dayNum = d.getDate();
+    var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    opt.textContent = dayNames[i] + ' ' + dayNum + '-' + monthNames[d.getMonth()];
+    if (d.toDateString() === today.toDateString()) opt.selected = true;
+    sel.appendChild(opt);
+  }
 })();
 
 /* ════════════════════════════════════════════════
