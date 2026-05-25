@@ -636,7 +636,8 @@ td.dim { color: var(--text3); }
           </table>
         </div>
         <div class="export-bar">
-          <button class="btn btn-glow btn-sm" onclick="downloadResultsPDF()" style="padding:9px 20px;">↓ DOWNLOAD PDF</button>
+          <button class="btn btn-glow btn-sm" onclick="downloadWeekPDF()" style="padding:9px 20px;">↓ FULL WEEK PDF</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadResultsPDF()">↓ THIS DAY PDF</button>
           <button class="btn btn-ghost btn-sm" onclick="downloadResultsCSV()">↓ CSV</button>
           <button class="btn btn-ghost btn-sm" onclick="copyResults()">⎘ CLIPBOARD</button>
         </div>
@@ -829,13 +830,63 @@ function generateTasks(){
   w.sort(function(a,b){return a.start<b.start?-1:a.start>b.start?1:0;});
   var A=w.map(function(s){
     var ag=agInfo(s.name),hr=parseInt(s.start.split(':')[0],10);
-    return{name:s.name,group:ag.group,queue:ag.queue,startHr:hr,start:s.start,end:s.end,shift:hr<12?'Morning':'Afternoon',mainTask:'',secTask:''};
+    return{name:s.name,group:ag.group,queue:ag.queue,startHr:hr,start:s.start,end:s.end,shift:hr<13?'Morning':'Afternoon',mainTask:'',secTask:''};
   });
   assignCasino(A);assignVIP(A,'Morning');assignVIP(A,'Afternoon');assignTier1(A);
   assignDeposits(A,'Morning');assignDeposits(A,'Afternoon');
   assignPayouts(A,'Morning');assignPayouts(A,'Afternoon');
   assignFixed(A);assignBlasts(A);assignBreaks(A);
   lastResults=A;renderResults();switchView('results');
+}
+
+/* Generate tasks for a single day from weekly data, returns assignment array */
+function generateForDay(parsed, dayIdx) {
+  var newSched = [];
+  Object.keys(parsed.agentDays).forEach(function(name) {
+    var shifts = parsed.agentDays[name];
+    var shiftStr = shifts[dayIdx] || 'OFF';
+    var result = parseShiftStr(shiftStr);
+    if (!result) return;
+    var entry = { name: name, start: '00:00', end: '00:00', status: result.status };
+    if (result.status === 'working') { entry.start = result.start; entry.end = result.end; }
+    newSched.push(entry);
+  });
+
+  var w = newSched.filter(function(s){ return s.status === 'working'; });
+  w.sort(function(a,b){ return a.start < b.start ? -1 : a.start > b.start ? 1 : 0; });
+  var A = w.map(function(s){
+    var ag = agInfo(s.name), hr = parseInt(s.start.split(':')[0],10);
+    return {name:s.name, group:ag.group, queue:ag.queue, startHr:hr,
+            start:s.start, end:s.end, shift: hr<13?'Morning':'Afternoon',
+            mainTask:'', secTask:''};
+  });
+  assignCasino(A); assignVIP(A,'Morning'); assignVIP(A,'Afternoon'); assignTier1(A);
+  assignDeposits(A,'Morning'); assignDeposits(A,'Afternoon');
+  assignPayouts(A,'Morning'); assignPayouts(A,'Afternoon');
+  assignFixed(A); assignBlasts(A); assignBreaks(A);
+  return A;
+}
+
+/* Generate and export full week PDF */
+function downloadWeekPDF() {
+  if (!_weeklyParsed || !_weeklyParsed.dayLabels.length) {
+    alert('Upload a weekly schedule PDF first, then use this button.');
+    return;
+  }
+  var parsed = _weeklyParsed;
+  var dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+  var weekData = []; // [{dayLabel, dayName, assignments}]
+
+  for (var d = 0; d < parsed.dayLabels.length && d < 7; d++) {
+    var assignments = generateForDay(parsed, d);
+    weekData.push({
+      dayLabel: parsed.dayLabels[d],
+      dayName: dayNames[d] || 'Day '+(d+1),
+      assignments: assignments
+    });
+  }
+
+  buildWeekPDF(weekData);
 }
 
 function assignCasino(A){var cM=0,cA=0;A.forEach(function(a){if(a.group!=='A')return;if(a.shift==='Morning'){cM++;if(cM===1)a.mainTask='Casino';else{a.mainTask=isP(a.name)?'Phones':'Chats';a.secTask='2nd Casino';}}else{cA++;if(cA===1)a.mainTask='Casino';else{a.mainTask=isP(a.name)?'Phones':'Chats';a.secTask='2nd Casino';}}});}
@@ -943,94 +994,37 @@ function filterResults(f){resultFilter=f;renderResultsTable();}
    ════════════════════════════════════════════════ */
 function downloadResultsPDF(){
   if(!lastResults.length) return;
-  var jsPDF = window.jspdf.jsPDF;
-  var doc = new jsPDF({orientation:'landscape', unit:'mm', format:'a4'});
-  var W = doc.internal.pageSize.getWidth();
-  var H = doc.internal.pageSize.getHeight();
-
-  var dark = [6,8,12], surface = [15,18,25], neon = [0,240,255];
-  var lime = [163,255,87], hot = [255,61,113], amber = [255,176,87];
-  var violet = [180,122,255], blue = [77,142,255], coral = [255,122,92];
-  var gold = [255,215,106], slate = [123,139,162];
-  var textC = [234,240,255], textDim = [136,146,168], textMuted = [78,86,112];
-  var groupColors = {A:hot, B:blue, C:lime, D:violet, E:coral, F:gold, G:slate};
-  var isFirstPage = true;
-
-  function drawPageBg() {
-    doc.setFillColor(dark[0],dark[1],dark[2]);
-    doc.rect(0,0,W,H,'F');
-  }
-  function drawFooter() {
-    doc.setFillColor(surface[0],surface[1],surface[2]);
-    doc.rect(0,H-8,W,8,'F');
-    doc.setFont('helvetica','normal'); doc.setFontSize(6);
-    doc.setTextColor(textMuted[0],textMuted[1],textMuted[2]);
-    doc.text('BetAnything Task Maker  ·  Confidential', 10, H-3);
-    doc.text('Page '+doc.internal.getCurrentPageInfo().pageNumber, W-10, H-3, {align:'right'});
-  }
-
-  // ── Page 1: Background
-  drawPageBg();
-
-  // ── Top neon accent
-  doc.setFillColor(neon[0],neon[1],neon[2]);
-  doc.rect(0,0,W,1.2,'F');
-
-  // ── Header bar
-  doc.setFillColor(surface[0],surface[1],surface[2]);
-  doc.rect(0,1.2,W,28,'F');
-
-  // Logo
-  doc.setFillColor(neon[0],neon[1],neon[2]);
-  doc.circle(16,15.5,5,'F');
-  doc.setFont('helvetica','bold'); doc.setFontSize(9);
-  doc.setTextColor(dark[0],dark[1],dark[2]);
-  doc.text('BA',16,17,{align:'center'});
-
-  // Title
-  doc.setFont('helvetica','bold'); doc.setFontSize(18);
-  doc.setTextColor(textC[0],textC[1],textC[2]);
-  doc.text('TASK ASSIGNMENTS',26,14);
-
-  // Subtitle
   var now = new Date();
-  doc.setFont('helvetica','normal'); doc.setFontSize(8);
-  doc.setTextColor(textDim[0],textDim[1],textDim[2]);
-  doc.text('BetAnything Task Maker  ·  '+now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})+'  ·  '+now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}),26,20);
+  var dayLabel = document.getElementById('day-picker');
+  var title = dayLabel && dayLabel.options[dayLabel.selectedIndex] ? dayLabel.options[dayLabel.selectedIndex].text : now.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
+  buildDayPDF(lastResults, title);
+}
 
-  doc.setFontSize(7); doc.setTextColor(neon[0],neon[1],neon[2]);
-  doc.text('v3.0',26,25);
+/* ════════════════════════════════════════
+   SHARED PDF HELPERS
+   ════════════════════════════════════════ */
+var PDF_COLORS = {
+  dark:[6,8,12], surface:[15,18,25], surfaceAlt:[11,14,20],
+  neon:[0,240,255], lime:[163,255,87], hot:[255,61,113],
+  amber:[255,176,87], violet:[180,122,255], blue:[77,142,255],
+  coral:[255,122,92], gold:[255,215,106], slate:[123,139,162],
+  textC:[234,240,255], textDim:[136,146,168], textMuted:[78,86,112],
+  groups:{A:[255,61,113],B:[77,142,255],C:[163,255,87],D:[180,122,255],E:[255,122,92],F:[255,215,106],G:[123,139,162]}
+};
 
-  // ── Stats
-  var statsY=32;
-  var mornC=lastResults.filter(function(r){return r.shift==='Morning';}).length;
-  var aftC=lastResults.filter(function(r){return r.shift==='Afternoon';}).length;
-  var gc={}; lastResults.forEach(function(r){gc[r.group]=(gc[r.group]||0)+1;});
-  var statItems=[
-    {l:'TOTAL AGENTS',v:lastResults.length+'',c:neon},
-    {l:'MORNING SHIFT',v:mornC+'',c:amber},
-    {l:'AFTERNOON SHIFT',v:aftC+'',c:violet},
-    {l:'GROUPS ACTIVE',v:Object.keys(gc).length+'',c:lime}
-  ];
-  var sw=(W-20)/4;
-  statItems.forEach(function(s,i){
-    var sx=10+i*sw;
-    doc.setFillColor(surface[0],surface[1],surface[2]);
-    doc.roundedRect(sx,statsY,sw-3,15,2,2,'F');
-    doc.setFillColor(s.c[0],s.c[1],s.c[2]);
-    doc.rect(sx,statsY,sw-3,0.7,'F');
-    doc.setFont('helvetica','normal'); doc.setFontSize(5.5);
-    doc.setTextColor(textMuted[0],textMuted[1],textMuted[2]);
-    doc.text(s.l,sx+3,statsY+5);
-    doc.setFont('helvetica','bold'); doc.setFontSize(14);
-    doc.setTextColor(s.c[0],s.c[1],s.c[2]);
-    doc.text(s.v,sx+3,statsY+12.5);
-  });
+function pdfFooter(doc,W,H,c){
+  doc.setFillColor(c.surface[0],c.surface[1],c.surface[2]);
+  doc.rect(0,H-8,W,8,'F');
+  doc.setFont('helvetica','normal');doc.setFontSize(6);
+  doc.setTextColor(c.textMuted[0],c.textMuted[1],c.textMuted[2]);
+  doc.text('BetAnything Task Maker  ·  Confidential',10,H-3);
+  doc.text('Page '+doc.internal.getCurrentPageInfo().pageNumber,W-10,H-3,{align:'right'});
+}
 
-  // ── Tables
-  var tableY=statsY+19;
-  var morningData=lastResults.filter(function(r){return r.shift==='Morning';});
-  var afternoonData=lastResults.filter(function(r){return r.shift==='Afternoon';});
+function pdfDayTable(doc, assignments, startY, W, H, c, isNewPage) {
+  var morning = assignments.filter(function(r){return r.shift==='Morning';});
+  var afternoon = assignments.filter(function(r){return r.shift==='Afternoon';});
+  var hdrs = [['#','AGENT','SHIFT','GRP','MAIN TASK','SECONDARY TASK','BRK 1','BRK 2']];
 
   function buildRows(data){
     return data.map(function(r,i){
@@ -1038,84 +1032,175 @@ function downloadResultsPDF(){
     });
   }
 
-  var hdrs=[['#','AGENT','SHIFT','GRP','MAIN TASK','SECONDARY TASK','BREAK 1','BREAK 2']];
-
-  function renderSection(title,data,startY,titleColor){
-    doc.setFont('helvetica','bold'); doc.setFontSize(9);
-    doc.setTextColor(titleColor[0],titleColor[1],titleColor[2]);
-    doc.text(title+' ('+data.length+')',12,startY-1.5);
-
-    doc.autoTable({
-      head:hdrs, body:buildRows(data), startY:startY,
-      margin:{left:10,right:10,bottom:14},
+  function tableOpts(body, sy, label, labelColor) {
+    return {
+      head:hdrs, body:body, startY:sy,
+      margin:{left:8,right:8,bottom:14},
       theme:'plain',
-      styles:{
-        font:'helvetica',fontSize:7,
-        cellPadding:{top:2.2,bottom:2.2,left:3,right:3},
-        textColor:textC, fillColor:false,
-        lineColor:[25,30,42], lineWidth:0.1,
-        overflow:'linebreak', cellWidth:'wrap'
-      },
-      headStyles:{
-        fillColor:[20,24,35], textColor:textMuted,
-        fontSize:5.5, fontStyle:'bold',
-        cellPadding:{top:2.5,bottom:2.5,left:3,right:3}
-      },
+      tableWidth: W - 16,
+      styles:{font:'helvetica',fontSize:6.5,cellPadding:{top:1.8,bottom:1.8,left:2.5,right:2.5},textColor:c.textC,fillColor:false,lineColor:[25,30,42],lineWidth:0.1,overflow:'linebreak',cellWidth:'wrap'},
+      headStyles:{fillColor:[20,24,35],textColor:c.textMuted,fontSize:5,fontStyle:'bold',cellPadding:{top:2,bottom:2,left:2.5,right:2.5}},
       columnStyles:{
-        0:{cellWidth:8,halign:'center',textColor:textMuted},
-        1:{cellWidth:44,fontStyle:'bold'},
-        2:{cellWidth:24},
-        3:{cellWidth:10,halign:'center',textColor:textMuted},
-        4:{cellWidth:52},
-        5:{cellWidth:48,textColor:textDim},
-        6:{cellWidth:24,textColor:amber,fontSize:6.5},
-        7:{cellWidth:24,textColor:amber,fontSize:6.5}
+        0:{cellWidth:7,halign:'center',textColor:c.textMuted},
+        1:{cellWidth:40,fontStyle:'bold'},
+        2:{cellWidth:22},
+        3:{cellWidth:8,halign:'center',textColor:c.textMuted},
+        4:{cellWidth:'auto'},
+        5:{cellWidth:'auto',textColor:c.textDim},
+        6:{cellWidth:20,textColor:c.amber,fontSize:6},
+        7:{cellWidth:20,textColor:c.amber,fontSize:6}
       },
-      alternateRowStyles:{fillColor:[11,14,20]},
+      alternateRowStyles:{fillColor:c.surfaceAlt},
       willDrawPage:function(){
-        // Draw bg for NEW pages (not page 1 which is already drawn)
-        if(!isFirstPage){
-          drawPageBg();
-          // Continuation header
-          doc.setFillColor(surface[0],surface[1],surface[2]);
-          doc.rect(0,0,W,10,'F');
-          doc.setFillColor(neon[0],neon[1],neon[2]);
-          doc.rect(0,0,W,0.6,'F');
-          doc.setFont('helvetica','bold'); doc.setFontSize(8);
-          doc.setTextColor(textC[0],textC[1],textC[2]);
-          doc.text('TASK ASSIGNMENTS (cont.)',10,7);
-        }
-        isFirstPage=false;
+        if(isNewPage[0]){isNewPage[0]=false;return;}
+        doc.setFillColor(c.dark[0],c.dark[1],c.dark[2]);doc.rect(0,0,W,H,'F');
+        doc.setFillColor(c.surface[0],c.surface[1],c.surface[2]);doc.rect(0,0,W,8,'F');
+        doc.setFillColor(c.neon[0],c.neon[1],c.neon[2]);doc.rect(0,0,W,0.5,'F');
+        doc.setFont('helvetica','bold');doc.setFontSize(7);
+        doc.setTextColor(c.textC[0],c.textC[1],c.textC[2]);
+        doc.text('TASK ASSIGNMENTS (cont.)',8,5.5);
       },
       didDrawCell:function(data){
         if(data.section==='body'&&data.column.index===3){
-          var grp=data.cell.raw;
-          var clr=groupColors[grp]||textDim;
-          var cx=data.cell.x+data.cell.width/2;
-          var cy=data.cell.y+data.cell.height/2;
-          // Draw pill bg
-          doc.setFillColor(clr[0],clr[1],clr[2]);
-          doc.circle(cx,cy-0.3,2.3,'F');
-          doc.setFont('helvetica','bold'); doc.setFontSize(5.5);
-          doc.setTextColor(dark[0],dark[1],dark[2]);
-          doc.text(grp,cx,cy+0.7,{align:'center'});
+          var grp=data.cell.raw;var clr=c.groups[grp]||c.textDim;
+          var cx=data.cell.x+data.cell.width/2,cy=data.cell.y+data.cell.height/2;
+          doc.setFillColor(clr[0],clr[1],clr[2]);doc.circle(cx,cy-0.2,2,'F');
+          doc.setFont('helvetica','bold');doc.setFontSize(5);
+          doc.setTextColor(c.dark[0],c.dark[1],c.dark[2]);
+          doc.text(grp,cx,cy+0.6,{align:'center'});
         }
       },
-      didDrawPage:function(){
-        drawFooter();
-      }
-    });
-    return doc.lastAutoTable.finalY;
+      didDrawPage:function(){pdfFooter(doc,W,H,c);}
+    };
   }
 
-  var endY=tableY;
-  if(morningData.length) endY=renderSection('MORNING SHIFT',morningData,tableY,amber);
-  if(afternoonData.length) endY=renderSection('AFTERNOON SHIFT',afternoonData,endY+8,violet);
+  var curY = startY;
+  if (morning.length) {
+    doc.setFont('helvetica','bold');doc.setFontSize(8);
+    doc.setTextColor(c.amber[0],c.amber[1],c.amber[2]);
+    doc.text('MORNING  ('+morning.length+')',8,curY-1);
+    doc.autoTable(tableOpts(buildRows(morning),curY,null,c.amber));
+    curY = doc.lastAutoTable.finalY + 4;
+    isNewPage[0] = false;
+  }
+  if (afternoon.length) {
+    // Check if we need a new page
+    if (curY > H - 40) {
+      doc.addPage();
+      doc.setFillColor(c.dark[0],c.dark[1],c.dark[2]);doc.rect(0,0,W,H,'F');
+      curY = 14;
+      isNewPage[0] = true;
+    }
+    doc.setFont('helvetica','bold');doc.setFontSize(8);
+    doc.setTextColor(c.violet[0],c.violet[1],c.violet[2]);
+    doc.text('AFTERNOON  ('+afternoon.length+')',8,curY-1);
+    isNewPage[0] = true;
+    doc.autoTable(tableOpts(buildRows(afternoon),curY,null,c.violet));
+    curY = doc.lastAutoTable.finalY;
+  }
+  return curY;
+}
 
-  // Ensure footer on page 1 if tables didn't trigger didDrawPage for it
-  drawFooter();
+/* ════════════════════════════════════════
+   SINGLE DAY PDF
+   ════════════════════════════════════════ */
+function buildDayPDF(assignments, dayTitle) {
+  var jsPDF = window.jspdf.jsPDF;
+  var doc = new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  var W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  var c = PDF_COLORS;
 
-  doc.save('BetAnything_Tasks_'+td()+'.pdf');
+  // Page 1 bg
+  doc.setFillColor(c.dark[0],c.dark[1],c.dark[2]);doc.rect(0,0,W,H,'F');
+  doc.setFillColor(c.neon[0],c.neon[1],c.neon[2]);doc.rect(0,0,W,1,'F');
+  doc.setFillColor(c.surface[0],c.surface[1],c.surface[2]);doc.rect(0,1,W,22,'F');
+
+  // Logo
+  doc.setFillColor(c.neon[0],c.neon[1],c.neon[2]);doc.circle(14,12.5,4.5,'F');
+  doc.setFont('helvetica','bold');doc.setFontSize(8);doc.setTextColor(c.dark[0],c.dark[1],c.dark[2]);
+  doc.text('BA',14,14,{align:'center'});
+
+  // Title
+  doc.setFont('helvetica','bold');doc.setFontSize(16);doc.setTextColor(c.textC[0],c.textC[1],c.textC[2]);
+  doc.text(dayTitle+' — Task Assignments',23,11);
+  var now = new Date();
+  doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(c.textDim[0],c.textDim[1],c.textDim[2]);
+  doc.text('BetAnything  ·  Generated '+now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}),23,17);
+
+  // Stats mini
+  var mC = assignments.filter(function(r){return r.shift==='Morning';}).length;
+  var aC = assignments.filter(function(r){return r.shift==='Afternoon';}).length;
+  doc.setFont('helvetica','bold');doc.setFontSize(7);
+  doc.setTextColor(c.neon[0],c.neon[1],c.neon[2]);
+  doc.text(assignments.length+' agents',W-60,10);
+  doc.setTextColor(c.amber[0],c.amber[1],c.amber[2]);
+  doc.text(mC+' AM',W-38,10);
+  doc.setTextColor(c.violet[0],c.violet[1],c.violet[2]);
+  doc.text(aC+' PM',W-22,10);
+
+  var isNew = [true];
+  pdfDayTable(doc, assignments, 28, W, H, c, isNew);
+  pdfFooter(doc,W,H,c);
+
+  doc.save('BetAnything_Tasks_'+dayTitle.replace(/[^a-zA-Z0-9]/g,'_')+'.pdf');
+}
+
+/* ════════════════════════════════════════
+   FULL WEEK PDF — all 7 days
+   ════════════════════════════════════════ */
+function buildWeekPDF(weekData) {
+  var jsPDF = window.jspdf.jsPDF;
+  var doc = new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  var W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+  var c = PDF_COLORS;
+  var dayColors = [c.neon, c.blue, c.lime, c.amber, c.violet, c.coral, c.hot];
+
+  weekData.forEach(function(day, di) {
+    if (di > 0) doc.addPage();
+
+    // Page bg
+    doc.setFillColor(c.dark[0],c.dark[1],c.dark[2]);doc.rect(0,0,W,H,'F');
+
+    // Day header
+    var dc = dayColors[di % dayColors.length];
+    doc.setFillColor(dc[0],dc[1],dc[2]);doc.rect(0,0,W,1,'F');
+    doc.setFillColor(c.surface[0],c.surface[1],c.surface[2]);doc.rect(0,1,W,20,'F');
+
+    // Day indicator circle
+    doc.setFillColor(dc[0],dc[1],dc[2]);doc.circle(14,11.5,4.5,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(9);doc.setTextColor(c.dark[0],c.dark[1],c.dark[2]);
+    doc.text(day.dayName.substring(0,2).toUpperCase(),14,13,{align:'center'});
+
+    // Day title
+    doc.setFont('helvetica','bold');doc.setFontSize(15);doc.setTextColor(c.textC[0],c.textC[1],c.textC[2]);
+    doc.text(day.dayName+' '+day.dayLabel,23,10);
+
+    var mC = day.assignments.filter(function(r){return r.shift==='Morning';}).length;
+    var aC = day.assignments.filter(function(r){return r.shift==='Afternoon';}).length;
+    doc.setFont('helvetica','normal');doc.setFontSize(7);doc.setTextColor(c.textDim[0],c.textDim[1],c.textDim[2]);
+    doc.text(day.assignments.length+' agents  ·  '+mC+' morning  ·  '+aC+' afternoon',23,16);
+
+    // Right side: BetAnything branding
+    doc.setFont('helvetica','bold');doc.setFontSize(7);doc.setTextColor(dc[0],dc[1],dc[2]);
+    doc.text('BetAnything Task Maker',W-8,8,{align:'right'});
+    doc.setFont('helvetica','normal');doc.setFontSize(6);doc.setTextColor(c.textMuted[0],c.textMuted[1],c.textMuted[2]);
+    doc.text('Day '+(di+1)+' of '+weekData.length,W-8,13,{align:'right'});
+
+    if (day.assignments.length === 0) {
+      doc.setFont('helvetica','normal');doc.setFontSize(10);
+      doc.setTextColor(c.textMuted[0],c.textMuted[1],c.textMuted[2]);
+      doc.text('No agents scheduled for this day.',W/2,H/2,{align:'center'});
+      pdfFooter(doc,W,H,c);
+      return;
+    }
+
+    var isNew = [true];
+    pdfDayTable(doc, day.assignments, 26, W, H, c, isNew);
+    pdfFooter(doc,W,H,c);
+  });
+
+  var now = new Date();
+  doc.save('BetAnything_Week_'+weekData[0].dayLabel+'_to_'+weekData[weekData.length-1].dayLabel+'.pdf');
 }
 
 function downloadResultsCSV(){
