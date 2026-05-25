@@ -948,219 +948,174 @@ function downloadResultsPDF(){
   var W = doc.internal.pageSize.getWidth();
   var H = doc.internal.pageSize.getHeight();
 
-  // Colors
-  var dark = [6,8,12];
-  var surface = [15,18,25];
-  var neon = [0,240,255];
-  var neonDim = [10,30,38];
-  var lime = [163,255,87];
-  var hot = [255,61,113];
-  var amber = [255,176,87];
-  var violet = [180,122,255];
-  var blue = [77,142,255];
-  var coral = [255,122,92];
-  var gold = [255,215,106];
-  var slate = [123,139,162];
-  var textC = [234,240,255];
-  var textDim = [136,146,168];
-  var textMuted = [78,86,112];
-
+  var dark = [6,8,12], surface = [15,18,25], neon = [0,240,255];
+  var lime = [163,255,87], hot = [255,61,113], amber = [255,176,87];
+  var violet = [180,122,255], blue = [77,142,255], coral = [255,122,92];
+  var gold = [255,215,106], slate = [123,139,162];
+  var textC = [234,240,255], textDim = [136,146,168], textMuted = [78,86,112];
   var groupColors = {A:hot, B:blue, C:lime, D:violet, E:coral, F:gold, G:slate};
+  var isFirstPage = true;
 
-  // ── Background
-  doc.setFillColor.apply(doc, dark);
-  doc.rect(0, 0, W, H, 'F');
+  function drawPageBg() {
+    doc.setFillColor(dark[0],dark[1],dark[2]);
+    doc.rect(0,0,W,H,'F');
+  }
+  function drawFooter() {
+    doc.setFillColor(surface[0],surface[1],surface[2]);
+    doc.rect(0,H-8,W,8,'F');
+    doc.setFont('helvetica','normal'); doc.setFontSize(6);
+    doc.setTextColor(textMuted[0],textMuted[1],textMuted[2]);
+    doc.text('BetAnything Task Maker  ·  Confidential', 10, H-3);
+    doc.text('Page '+doc.internal.getCurrentPageInfo().pageNumber, W-10, H-3, {align:'right'});
+  }
 
-  // ── Top accent line
-  var grd = doc.setFillColor.bind(doc);
-  grd(neon[0], neon[1], neon[2]);
-  doc.rect(0, 0, W, 1.2, 'F');
+  // ── Page 1: Background
+  drawPageBg();
 
-  // ── Header area
-  grd(surface[0], surface[1], surface[2]);
-  doc.rect(0, 1.2, W, 30, 'F');
+  // ── Top neon accent
+  doc.setFillColor(neon[0],neon[1],neon[2]);
+  doc.rect(0,0,W,1.2,'F');
 
-  // Logo circle
-  grd(neon[0], neon[1], neon[2]);
-  doc.circle(16, 16, 5.5, 'F');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor.apply(doc, dark);
-  doc.text('BA', 16, 17.5, {align:'center'});
+  // ── Header bar
+  doc.setFillColor(surface[0],surface[1],surface[2]);
+  doc.rect(0,1.2,W,28,'F');
+
+  // Logo
+  doc.setFillColor(neon[0],neon[1],neon[2]);
+  doc.circle(16,15.5,5,'F');
+  doc.setFont('helvetica','bold'); doc.setFontSize(9);
+  doc.setTextColor(dark[0],dark[1],dark[2]);
+  doc.text('BA',16,17,{align:'center'});
 
   // Title
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.setTextColor.apply(doc, textC);
-  doc.text('TASK ASSIGNMENTS', 26, 13);
+  doc.setFont('helvetica','bold'); doc.setFontSize(18);
+  doc.setTextColor(textC[0],textC[1],textC[2]);
+  doc.text('TASK ASSIGNMENTS',26,14);
 
   // Subtitle
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9);
-  doc.setTextColor.apply(doc, textDim);
   var now = new Date();
-  doc.text('BetAnything Task Maker  ·  ' + now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'}) + '  ·  Generated at ' + now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}), 26, 20);
+  doc.setFont('helvetica','normal'); doc.setFontSize(8);
+  doc.setTextColor(textDim[0],textDim[1],textDim[2]);
+  doc.text('BetAnything Task Maker  ·  '+now.toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})+'  ·  '+now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false}),26,20);
 
-  // Version tag
-  doc.setFontSize(7);
-  doc.setTextColor.apply(doc, neon);
-  doc.text('v3.0', 26, 26);
+  doc.setFontSize(7); doc.setTextColor(neon[0],neon[1],neon[2]);
+  doc.text('v3.0',26,25);
 
-  // ── Stats bar
-  var statsY = 34;
-  var morning = lastResults.filter(function(r){return r.shift==='Morning';}).length;
-  var afternoon = lastResults.filter(function(r){return r.shift==='Afternoon';}).length;
-  var gc = {};
-  lastResults.forEach(function(r){gc[r.group]=(gc[r.group]||0)+1;});
-
-  var stats = [
-    {label:'TOTAL AGENTS', val: lastResults.length+'', color:neon},
-    {label:'MORNING', val: morning+'', color:amber},
-    {label:'AFTERNOON', val: afternoon+'', color:violet},
-    {label:'GROUPS ACTIVE', val: Object.keys(gc).length+'', color:lime}
+  // ── Stats
+  var statsY=32;
+  var mornC=lastResults.filter(function(r){return r.shift==='Morning';}).length;
+  var aftC=lastResults.filter(function(r){return r.shift==='Afternoon';}).length;
+  var gc={}; lastResults.forEach(function(r){gc[r.group]=(gc[r.group]||0)+1;});
+  var statItems=[
+    {l:'TOTAL AGENTS',v:lastResults.length+'',c:neon},
+    {l:'MORNING SHIFT',v:mornC+'',c:amber},
+    {l:'AFTERNOON SHIFT',v:aftC+'',c:violet},
+    {l:'GROUPS ACTIVE',v:Object.keys(gc).length+'',c:lime}
   ];
-  var statW = (W - 20) / 4;
-  stats.forEach(function(s, i){
-    var sx = 10 + i * statW;
-    grd(surface[0], surface[1], surface[2]);
-    doc.roundedRect(sx, statsY, statW - 3, 16, 2, 2, 'F');
-    // Top accent
-    doc.setFillColor.apply(doc, s.color);
-    doc.rect(sx, statsY, statW - 3, 0.8, 'F');
-    // Label
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6);
-    doc.setTextColor.apply(doc, textMuted);
-    doc.text(s.label, sx + 4, statsY + 5);
-    // Value
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.setTextColor.apply(doc, s.color);
-    doc.text(s.val, sx + 4, statsY + 13);
+  var sw=(W-20)/4;
+  statItems.forEach(function(s,i){
+    var sx=10+i*sw;
+    doc.setFillColor(surface[0],surface[1],surface[2]);
+    doc.roundedRect(sx,statsY,sw-3,15,2,2,'F');
+    doc.setFillColor(s.c[0],s.c[1],s.c[2]);
+    doc.rect(sx,statsY,sw-3,0.7,'F');
+    doc.setFont('helvetica','normal'); doc.setFontSize(5.5);
+    doc.setTextColor(textMuted[0],textMuted[1],textMuted[2]);
+    doc.text(s.l,sx+3,statsY+5);
+    doc.setFont('helvetica','bold'); doc.setFontSize(14);
+    doc.setTextColor(s.c[0],s.c[1],s.c[2]);
+    doc.text(s.v,sx+3,statsY+12.5);
   });
 
-  // ── Table
-  var tableY = statsY + 20;
+  // ── Tables
+  var tableY=statsY+19;
+  var morningData=lastResults.filter(function(r){return r.shift==='Morning';});
+  var afternoonData=lastResults.filter(function(r){return r.shift==='Afternoon';});
 
-  // Split into morning and afternoon
-  var morningData = lastResults.filter(function(r){return r.shift==='Morning';});
-  var afternoonData = lastResults.filter(function(r){return r.shift==='Afternoon';});
-
-  function buildRows(data) {
+  function buildRows(data){
     return data.map(function(r,i){
-      return [
-        (i+1)+'',
-        r.name,
-        r.start + ' – ' + r.end,
-        r.group,
-        r.mainTask,
-        r.secTask || '—',
-        r.break1 || '—',
-        r.break2 || '—'
-      ];
+      return [(i+1)+'',r.name,r.start+' – '+r.end,r.group,r.mainTask,r.secTask||'—',r.break1||'—',r.break2||'—'];
     });
   }
 
-  var headers = [['#','AGENT','SHIFT','GRP','MAIN TASK','SECONDARY TASK','BREAK 1','BREAK 2']];
+  var hdrs=[['#','AGENT','SHIFT','GRP','MAIN TASK','SECONDARY TASK','BREAK 1','BREAK 2']];
 
-  function renderSection(title, data, startY, titleColor) {
-    // Section label
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor.apply(doc, titleColor);
-    doc.text(title + ' (' + data.length + ')', 12, startY - 2);
+  function renderSection(title,data,startY,titleColor){
+    doc.setFont('helvetica','bold'); doc.setFontSize(9);
+    doc.setTextColor(titleColor[0],titleColor[1],titleColor[2]);
+    doc.text(title+' ('+data.length+')',12,startY-1.5);
 
     doc.autoTable({
-      head: headers,
-      body: buildRows(data),
-      startY: startY,
-      margin: {left:10, right:10},
-      theme: 'plain',
-      styles: {
-        font: 'helvetica',
-        fontSize: 7,
-        cellPadding: {top:2.5, bottom:2.5, left:3, right:3},
-        textColor: textC,
-        fillColor: false,
-        lineColor: [30,35,50],
-        lineWidth: 0.1,
-        overflow: 'linebreak',
-        cellWidth: 'wrap'
+      head:hdrs, body:buildRows(data), startY:startY,
+      margin:{left:10,right:10,bottom:14},
+      theme:'plain',
+      styles:{
+        font:'helvetica',fontSize:7,
+        cellPadding:{top:2.2,bottom:2.2,left:3,right:3},
+        textColor:textC, fillColor:false,
+        lineColor:[25,30,42], lineWidth:0.1,
+        overflow:'linebreak', cellWidth:'wrap'
       },
-      headStyles: {
-        fillColor: surface,
-        textColor: textMuted,
-        fontSize: 5.5,
-        fontStyle: 'bold',
-        cellPadding: {top:3, bottom:3, left:3, right:3},
-        halign: 'left'
+      headStyles:{
+        fillColor:[20,24,35], textColor:textMuted,
+        fontSize:5.5, fontStyle:'bold',
+        cellPadding:{top:2.5,bottom:2.5,left:3,right:3}
       },
-      columnStyles: {
-        0: {cellWidth:8, halign:'center', textColor:textMuted},
-        1: {cellWidth:45, fontStyle:'bold'},
-        2: {cellWidth:22},
-        3: {cellWidth:10, halign:'center'},
-        4: {cellWidth:55},
-        5: {cellWidth:50, textColor:textDim},
-        6: {cellWidth:22, textColor:amber, fontSize:6.5},
-        7: {cellWidth:22, textColor:amber, fontSize:6.5}
+      columnStyles:{
+        0:{cellWidth:8,halign:'center',textColor:textMuted},
+        1:{cellWidth:44,fontStyle:'bold'},
+        2:{cellWidth:24},
+        3:{cellWidth:10,halign:'center',textColor:textMuted},
+        4:{cellWidth:52},
+        5:{cellWidth:48,textColor:textDim},
+        6:{cellWidth:24,textColor:amber,fontSize:6.5},
+        7:{cellWidth:24,textColor:amber,fontSize:6.5}
       },
-      alternateRowStyles: {
-        fillColor: [11,14,20]
+      alternateRowStyles:{fillColor:[11,14,20]},
+      willDrawPage:function(){
+        // Draw bg for NEW pages (not page 1 which is already drawn)
+        if(!isFirstPage){
+          drawPageBg();
+          // Continuation header
+          doc.setFillColor(surface[0],surface[1],surface[2]);
+          doc.rect(0,0,W,10,'F');
+          doc.setFillColor(neon[0],neon[1],neon[2]);
+          doc.rect(0,0,W,0.6,'F');
+          doc.setFont('helvetica','bold'); doc.setFontSize(8);
+          doc.setTextColor(textC[0],textC[1],textC[2]);
+          doc.text('TASK ASSIGNMENTS (cont.)',10,7);
+        }
+        isFirstPage=false;
       },
-      didDrawCell: function(data) {
-        // Color the group cell background
-        if (data.section === 'body' && data.column.index === 3) {
-          var grp = data.cell.raw;
-          var gc = groupColors[grp] || textDim;
-          doc.setFillColor(gc[0], gc[1], gc[2]);
-          var cx = data.cell.x + data.cell.width/2;
-          var cy = data.cell.y + data.cell.height/2;
-          doc.circle(cx, cy - 0.5, 2.5, 'F');
-          doc.setFont('helvetica','bold');
-          doc.setFontSize(6);
-          doc.setTextColor.apply(doc, dark);
-          doc.text(grp, cx, cy + 0.5, {align:'center'});
-          // Clear the auto-drawn text
-          doc.setTextColor.apply(doc, [0,0,0,0]);
+      didDrawCell:function(data){
+        if(data.section==='body'&&data.column.index===3){
+          var grp=data.cell.raw;
+          var clr=groupColors[grp]||textDim;
+          var cx=data.cell.x+data.cell.width/2;
+          var cy=data.cell.y+data.cell.height/2;
+          // Draw pill bg
+          doc.setFillColor(clr[0],clr[1],clr[2]);
+          doc.circle(cx,cy-0.3,2.3,'F');
+          doc.setFont('helvetica','bold'); doc.setFontSize(5.5);
+          doc.setTextColor(dark[0],dark[1],dark[2]);
+          doc.text(grp,cx,cy+0.7,{align:'center'});
         }
       },
-      didDrawPage: function(data) {
-        // Redraw page background on new pages
-        doc.setFillColor.apply(doc, dark);
-        doc.rect(0, 0, W, H, 'F');
-        // Bottom bar
-        doc.setFillColor.apply(doc, surface);
-        doc.rect(0, H - 8, W, 8, 'F');
-        doc.setFont('helvetica','normal');
-        doc.setFontSize(6);
-        doc.setTextColor.apply(doc, textMuted);
-        doc.text('BetAnything Task Maker  ·  Confidential', 10, H - 3);
-        doc.text('Page ' + doc.internal.getCurrentPageInfo().pageNumber, W - 10, H - 3, {align:'right'});
+      didDrawPage:function(){
+        drawFooter();
       }
     });
-
     return doc.lastAutoTable.finalY;
   }
 
-  var endY = tableY;
-  if (morningData.length) {
-    endY = renderSection('MORNING SHIFT', morningData, tableY, amber);
-  }
-  if (afternoonData.length) {
-    endY = renderSection('AFTERNOON SHIFT', afternoonData, endY + 10, violet);
-  }
+  var endY=tableY;
+  if(morningData.length) endY=renderSection('MORNING SHIFT',morningData,tableY,amber);
+  if(afternoonData.length) endY=renderSection('AFTERNOON SHIFT',afternoonData,endY+8,violet);
 
-  // Footer on first page
-  doc.setFillColor.apply(doc, surface);
-  doc.rect(0, H - 8, W, 8, 'F');
-  doc.setFont('helvetica','normal');
-  doc.setFontSize(6);
-  doc.setTextColor.apply(doc, textMuted);
-  doc.text('BetAnything Task Maker  ·  Confidential', 10, H - 3);
-  doc.text('Page 1', W - 10, H - 3, {align:'right'});
+  // Ensure footer on page 1 if tables didn't trigger didDrawPage for it
+  drawFooter();
 
-  doc.save('BetAnything_Tasks_' + td() + '.pdf');
+  doc.save('BetAnything_Tasks_'+td()+'.pdf');
 }
 
 function downloadResultsCSV(){
