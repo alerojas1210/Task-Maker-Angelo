@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BetAnything Task Maker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;500;600;700;800&family=Figtree:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* ═══════════════════════════════════════════════════
@@ -553,10 +554,10 @@ td.dim { color: var(--text3); }
 
     <div class="drop-zone" id="drop-zone">
       <div class="dz-icon">📄</div>
-      <div class="dz-title">Drop CSV or paste schedule below</div>
-      <div class="dz-sub">or <span id="browse-link">browse files</span> — accepts daily CSV (Name, Start, End) </div>
+      <div class="dz-title">Drop your schedule file here</div>
+      <div class="dz-sub">or <span id="browse-link">browse files</span> — accepts <strong>.pptx</strong>, .csv, or .txt</div>
     </div>
-    <input type="file" id="sched-file" accept=".csv,.txt" style="display:none">
+    <input type="file" id="sched-file" accept=".csv,.txt,.pptx,.ppt" style="display:none">
 
     <div class="panel" style="margin-bottom:16px;">
       <div class="panel-head">
@@ -1192,12 +1193,183 @@ function showUploadBanner(loaded, offCount, vacCount, total, unknownNames) {
 }
 
 function handleScheduleFile(file) {
+  var name = file.name.toLowerCase();
+  if (name.endsWith('.pptx') || name.endsWith('.ppt')) {
+    handlePPTX(file);
+  } else {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var ok = loadScheduleCSV(e.target.result);
+      if (ok) setTimeout(function() { generateTasks(); }, 400);
+    };
+    reader.readAsText(file);
+  }
+}
+
+/* ════════════════════════════════════════════════
+   PPTX PARSER — extract tables from PowerPoint
+   ════════════════════════════════════════════════ */
+function handlePPTX(file) {
   var reader = new FileReader();
   reader.onload = function(e) {
-    var ok = loadScheduleCSV(e.target.result);
-    if (ok) setTimeout(function() { generateTasks(); }, 400);
+    JSZip.loadAsync(e.target.result).then(function(zip) {
+      // Find all slide XML files
+      var slideFiles = Object.keys(zip.files).filter(function(f) {
+        return /^ppt\/slides\/slide\d+\.xml$/.test(f);
+      }).sort();
+
+      var allText = [];
+      var pending = slideFiles.length;
+      if (pending === 0) { alert('No slides found in PPTX.'); return; }
+
+      slideFiles.forEach(function(sf) {
+        zip.file(sf).async('string').then(function(xml) {
+          var tables = extractTablesFromSlideXML(xml);
+          tables.forEach(function(tbl) { allText.push(tbl); });
+          pending--;
+          if (pending === 0) {
+            finishPPTXParse(allText);
+          }
+        });
+      });
+    }).catch(function(err) {
+      alert('Error reading PPTX: ' + err.message);
+    });
   };
-  reader.readAsText(file);
+  reader.readAsArrayBuffer(file);
+}
+
+function extractTablesFromSlideXML(xml) {
+  // Parse the XML and extract table rows
+  var parser = new DOMParser();
+  var doc = parser.parseFromString(xml, 'text/xml');
+
+  // PowerPoint tables are in <a:tbl> elements
+  // Rows are <a:tr>, cells are <a:tc>, text is in <a:t>
+  var tables = [];
+  var ns = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+
+  // Get all table elements
+  var tblNodes = doc.getElementsByTagNameNS(ns, 'tbl');
+  for (var t = 0; t < tblNodes.length; t++) {
+    var tbl = tblNodes[t];
+    var rows = tbl.getElementsByTagNameNS(ns, 'tr');
+    var tableRows = [];
+
+    for (var r = 0; r < rows.length; r++) {
+      var cells = rows[r].getElementsByTagNameNS(ns, 'tc');
+      var rowData = [];
+      for (var c = 0; c < cells.length; c++) {
+        // Get all text in this cell
+        var texts = cells[c].getElementsByTagNameNS(ns, 't');
+        var cellText = '';
+        for (var tx = 0; tx < texts.length; tx++) {
+          cellText += (texts[tx].textContent || '');
+        }
+        // Handle gridSpan (merged cells)
+        var span = parseInt(cells[c].getAttribute('gridSpan') || '1', 10);
+        rowData.push(cellText.trim());
+        for (var s = 1; s < span; s++) rowData.push('');
+      }
+      tableRows.push(rowData);
+    }
+    if (tableRows.length > 0) tables.push(tableRows);
+  }
+
+  // Also extract text from shapes (non-table text like "Schedule", headers)
+  var spNodes = doc.getElementsByTagNameNS(ns, 't');
+  var freeText = [];
+  for (var i = 0; i < spNodes.length; i++) {
+    var txt = (spNodes[i].textContent || '').trim();
+    if (txt) freeText.push(txt);
+  }
+
+  return tables;
+}
+
+function finishPPTXParse(allTables) {
+  if (allTables.length === 0) { alert('No tables found in the PowerPoint.'); return; }
+
+  // Build a unified agent → day shifts map from all tables
+  var dayLabels = [];
+  var agentDays = {};
+
+  allTables.forEach(function(table) {
+    if (table.length < 2) return;
+
+    // Find the header row — look for one containing day names or date patterns
+    var headerIdx = -1;
+    for (var r = 0; r < Math.min(3, table.length); r++) {
+      var row = table[r];
+      var hasDayOrDate = row.some(function(c) {
+        return /\d+-\w{3}/.test(c) || /monday|tuesday|wednesday|thursday|friday|saturday|sunday/i.test(c);
+      });
+      if (hasDayOrDate) { headerIdx = r; break; }
+    }
+    if (headerIdx === -1) return;
+
+    var header = table[headerIdx];
+
+    // Find date columns (e.g., "25-May")
+    var dateIndices = [];
+    header.forEach(function(cell, idx) {
+      if (/\d+-\w{3}/.test(cell)) {
+        dateIndices.push(idx);
+        if (dayLabels.length < 7) {
+          var m = cell.match(/(\d+-\w{3})/);
+          if (m && dayLabels.indexOf(m[1]) === -1) dayLabels.push(m[1]);
+        }
+      }
+    });
+
+    if (dateIndices.length === 0) return;
+
+    // Find name column — usually col 0 or first col with text that isn't a day/date
+    var nameCol = 0;
+    for (var ci = 0; ci < header.length; ci++) {
+      var h = header[ci].toLowerCase();
+      if (h === 'agent' || h === 'name' || h === '') { nameCol = ci; break; }
+    }
+
+    // Parse agent rows
+    for (var r = headerIdx + 1; r < table.length; r++) {
+      var row = table[r];
+      if (!row[nameCol]) continue;
+      var name = row[nameCol].trim();
+
+      // Skip section headers, coach lines, empty
+      if (!name || name.length < 2) continue;
+      var lower = name.toLowerCase();
+      if (/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|agent|coach|phones|chats)$/i.test(lower)) continue;
+      if (lower === 'coach') continue;
+
+      var shifts = [];
+      dateIndices.forEach(function(di) {
+        shifts.push((row[di] || '').trim());
+      });
+
+      // Only add if at least one shift cell has data
+      var hasData = shifts.some(function(s) { return s && s !== ''; });
+      if (hasData) {
+        agentDays[name] = shifts;
+      }
+    }
+  });
+
+  if (Object.keys(agentDays).length === 0) {
+    alert('Could not find agent schedules in the PowerPoint tables.');
+    return;
+  }
+
+  // Store and populate
+  _weeklyParsed = { dayLabels: dayLabels, agentDays: agentDays };
+
+  if (dayLabels.length > 0) {
+    populateDayPicker(dayLabels);
+  }
+
+  var dayIdx = parseInt(document.getElementById('day-picker').value, 10) || 0;
+  loadDayFromWeekly(_weeklyParsed, dayIdx);
 }
 
 /* ════════════════════════════════════════════════
@@ -1318,8 +1490,11 @@ function minToTime(m) {
   dz.addEventListener('drop', function(e) {
     e.preventDefault(); dz.classList.remove('dragover');
     var files = Array.from(e.dataTransfer.files);
-    var csv = files.find(function(f) { return f.name.endsWith('.csv') || f.name.endsWith('.txt'); });
-    if (csv) handleScheduleFile(csv);
+    var accepted = files.find(function(f) {
+      var n = f.name.toLowerCase();
+      return n.endsWith('.csv') || n.endsWith('.txt') || n.endsWith('.pptx') || n.endsWith('.ppt');
+    });
+    if (accepted) handleScheduleFile(accepted);
   });
 
   fi.addEventListener('change', function() {
